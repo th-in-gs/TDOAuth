@@ -35,12 +35,7 @@
   to interact with in the wild. How ace is that?!
 */
 
-@interface TDOAuth : NSObject {
-    NSURL *url;
-    NSString *signature_secret;
-    NSDictionary *params; // these are pre-percent encoded
-    NSString *method;
-}
+@interface TDOAuth : NSObject
 
 /**
   @p unencodeParameters may be nil. Objects in the dictionary must be strings.
@@ -140,13 +135,3 @@
 */
 extern int TDOAuthUTCTimeOffset;
 
-
-
-@interface NSString (TweetDeck)
-- (NSString*)pcen;
-@end
-
-@interface NSMutableString (TweetDeck)
-- (NSMutableString *)add:(NSString *)s;
-- (NSMutableString *)chomp;
-@end

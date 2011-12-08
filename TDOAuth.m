@@ -41,34 +41,42 @@
 
 int TDOAuthUTCTimeOffset = 0;
 
+@interface NSString (TweetDeck)
+- (NSString*)tdOAuthPcen;
+@end
+
+@interface NSMutableString (TweetDeck)
+- (NSMutableString *)tdOAuthAdd:(NSString *)s;
+- (NSMutableString *)tdOAuthChomp;
+@end
 
 
 @implementation NSString (TweetDeck)
-- (id)pcen {
-    NSString* rv = (NSString *) CFURLCreateStringByAddingPercentEscapes(NULL, (CFStringRef) self, NULL, (CFStringRef) @"!*'();:@&=+$,/?%#[]", kCFStringEncodingUTF8);
-    return [rv autorelease];
+- (id)tdOAuthPcen {
+    NSString* rv = (__bridge_transfer NSString *) CFURLCreateStringByAddingPercentEscapes(NULL, (__bridge CFStringRef) self, NULL, CFSTR("!*'();:@&=+$,/?%#[]"), kCFStringEncodingUTF8);
+    return rv;
 }
 @end
 
 @implementation NSNumber (TweetDeck)
-- (id)pcen {
+- (id)tdOAuthPcen {
     // We permit NSNumbers as parameters, so we need to handle this function call
     return [self stringValue];
 }
 @end
 
 @implementation NSMutableString (TweetDeck)
-- (id)add:(NSString *)s {
+- (id)tdOAuthAdd:(NSString *)s {
     if ([s isKindOfClass:[NSString class]])
         [self appendString:s];
     if ([s isKindOfClass:[NSNumber class]])
         [self appendString:[(NSNumber *)s stringValue]];
     return self;
 }
-- (id)chomp {
-    const int N = [self length] - 1;
-    if (N >= 0)
-        [self deleteCharactersInRange:NSMakeRange(N, 1)];
+- (id)tdOAuthChomp {
+    const NSUInteger N = [self length];
+    if (N > 0)
+        [self deleteCharactersInRange:NSMakeRange(N - 1, 1)];
     return self;
 }
 @end
@@ -95,26 +103,36 @@ static NSString* base64(const uint8_t* input) {
     }
     out[-2] = map[(input[19] & 0x0F) << 2];
     out[-1] = '=';
-    return [[[NSString alloc] initWithData:data encoding:NSASCIIStringEncoding] autorelease];
+    return [[NSString alloc] initWithData:data encoding:NSASCIIStringEncoding];
 }
 
 static NSString* nonce() {
     CFUUIDRef uuid = CFUUIDCreate(NULL);
     CFStringRef s = CFUUIDCreateString(NULL, uuid);
     CFRelease(uuid);
-    return [(id)s autorelease];
+    return (__bridge_transfer NSString *)s;
 }
 
 static NSString* timestamp() {
     time_t t;
     time(&t);
     mktime(gmtime(&t));
-    return [NSString stringWithFormat:@"%u", t + TDOAuthUTCTimeOffset];
+    return [[NSString alloc] initWithFormat:@"%u", t + TDOAuthUTCTimeOffset];
 }
 
 
+@interface TDOAuth () 
+@property (nonatomic, strong) NSURL *url;
+@property (nonatomic, strong) NSString *method;
+@end
 
-@implementation TDOAuth
+@implementation TDOAuth {
+    NSString *signature_secret;
+    NSDictionary *params; // these are pre-percent encoded
+}
+
+@synthesize url;
+@synthesize method;
 
 - (id)initWithConsumerKey:(NSString *)consumerKey
            consumerSecret:(NSString *)consumerSecret
@@ -138,15 +156,15 @@ static NSString* timestamp() {
     NSMutableString *p3 = [NSMutableString stringWithCapacity:256];
     NSArray *keys = [[params allKeys] sortedArrayUsingSelector:@selector(compare:)];
     for (NSString *key in keys)
-        [[[[p3 add:[key pcen]] add:@"="] add:[params objectForKey:key]] add:@"&"];
-    [p3 chomp];
+        [[[[p3 tdOAuthAdd:[key tdOAuthPcen]] tdOAuthAdd:@"="] tdOAuthAdd:[params objectForKey:key]] tdOAuthAdd:@"&"];
+    [p3 tdOAuthChomp];
 
     return [NSString stringWithFormat:@"%@&%@%%3A%%2F%%2F%@%@&%@",
             method,
             url.scheme.lowercaseString,
-            url.host.lowercaseString.pcen,
-            url.path.pcen,
-            p3.pcen];
+            url.host.lowercaseString.tdOAuthPcen,
+            url.path.tdOAuthPcen,
+            p3.tdOAuthPcen];
 }
 
 - (NSString *)signature {
@@ -164,10 +182,10 @@ static NSString* timestamp() {
 
 - (NSString *)authorizationHeader {
     NSMutableString *header = [NSMutableString stringWithCapacity:512];
-    [header add:@"OAuth "];
+    [header tdOAuthAdd:@"OAuth "];
     for (NSString *key in params.allKeys)
-        [[[[header add:key] add:@"=\""] add:[params objectForKey:key]] add:@"\", "];
-    [[[header add:@"oauth_signature=\""] add:self.signature.pcen] add:@"\""];
+        [[[[header tdOAuthAdd:key] tdOAuthAdd:@"=\""] tdOAuthAdd:[params objectForKey:key]] tdOAuthAdd:@"\", "];
+    [[[header tdOAuthAdd:@"oauth_signature=\""] tdOAuthAdd:self.signature.tdOAuthPcen] tdOAuthAdd:@"\""];
     return header;
 }
 
@@ -185,7 +203,7 @@ static NSString* timestamp() {
     return rq;
 }
 
-// unencodedParameters are encoded and added to self->params, returns encoded queryString
+// unencodedParameters are encoded and added to params, returns encoded queryString
 - (id)addParameters:(NSDictionary *)unencodedParameters {
     if (!unencodedParameters.count)
         return nil;
@@ -193,12 +211,12 @@ static NSString* timestamp() {
     NSMutableString *queryString = [NSMutableString string];
     NSMutableDictionary *encodedParameters = [NSMutableDictionary dictionaryWithDictionary:params];
     for (NSString *key in unencodedParameters.allKeys) {
-        NSString *enkey = key.pcen;
-        NSString *envalue = [[unencodedParameters objectForKey:key] pcen];
+        NSString *enkey = key.tdOAuthPcen;
+        NSString *envalue = [[unencodedParameters objectForKey:key] tdOAuthPcen];
         [encodedParameters setObject:envalue forKey:enkey];
-        [[[[queryString add:enkey] add:@"="] add:envalue] add:@"&"];
+        [[[[queryString tdOAuthAdd:enkey] tdOAuthAdd:@"="] tdOAuthAdd:envalue] tdOAuthAdd:@"&"];
     }
-    [queryString chomp];
+    [queryString tdOAuthChomp];
 
     params = encodedParameters;
 
@@ -240,7 +258,7 @@ static NSString* timestamp() {
                                               accessToken:accessToken
                                               tokenSecret:tokenSecret];
 
-    // We don't use pcen as we don't want to percent encode eg. /, this
+    // We don't use tdOAuthPcen as we don't want to percent encode eg. /, this
     // is perhaps not the most all encompassing solution, but in practice
     // it works everywhere and means that programmer error is *much* less
     // likely.
@@ -254,12 +272,11 @@ static NSString* timestamp() {
         path = encodedPathWithoutQuery;
     }
 
-    oauth->method = @"GET";
-    oauth->url = [[NSURL alloc] initWithString:[NSString stringWithFormat:@"%@://%@%@", scheme, host, path]];
+    oauth.method = @"GET";
+    oauth.url = [[NSURL alloc] initWithString:[NSString stringWithFormat:@"%@://%@%@", scheme, host, path]];
 
     NSURLRequest *rq = [oauth request];
-    [oauth->url release];
-    [oauth release];
+
     return rq;
 }
 
@@ -278,8 +295,9 @@ static NSString* timestamp() {
                                            consumerSecret:consumerSecret
                                               accessToken:accessToken
                                               tokenSecret:tokenSecret];
-    oauth->url = [[NSURL alloc] initWithScheme:@"https" host:host path:unencodedPath];
-    oauth->method = @"POST";
+    
+    oauth.url = [[NSURL alloc] initWithScheme:@"https" host:host path:unencodedPath];
+    oauth.method = @"POST";
 
     NSMutableString *postbody = [oauth addParameters:unencodedParameters];
     NSMutableURLRequest *rq = [oauth request];
@@ -289,9 +307,6 @@ static NSString* timestamp() {
         [rq setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
         [rq setValue:[NSString stringWithFormat:@"%u", rq.HTTPBody.length] forHTTPHeaderField:@"Content-Length"];
     }
-
-    [oauth->url release];
-    [oauth release];
 
     return rq;
 }
